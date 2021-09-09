@@ -1,0 +1,145 @@
+def BRANCH
+def VERSION
+pipeline {
+    agent {
+        label 'SingleClickDeploySlave'
+    }
+	options {
+	  ansiColor("xterm")
+    }
+    stages {
+        stage ('install modules') {
+		    steps{
+			  script {
+                BRANCH =  sh(returnStdout: true, script: "echo ${BRANCH_NAME} | sed 's@/@-@g'").trim()
+                VERSION = "0.0.1-${BRANCH}-${BUILD_ID}"
+                sh "rm -rf dist/"
+                sh 'npm install'                
+               }
+			}
+		}
+        // stage ('Test') {
+		//     steps{
+		// 	  script {
+        //         sh 'ng test --code-coverage'
+        //        }
+		// 	}
+		// }
+        stage ('Sonar') {
+		    steps{
+			  script {
+                sh 'npm run sonar'
+               }
+			}
+		}
+        stage ('Build') {
+		    steps{
+			  script {
+                sh 'ng build --configuration es5 --base-href /api-hotels-web/'
+               }
+			}
+		}
+        stage ('compress') {
+		    steps{
+			  script {
+                  sh "rm -rf *.tar.gz"
+                  sh "cd dist/ && tar -czvf ../api-hotels-web-${BUILD_ID}.tar.gz api-hotels-web/* && cd ../"
+               }
+			}
+		}
+        stage ('publish'){
+            steps{
+                script{
+                    echo "$VERSION"
+                    nexusArtifactUploader( 
+                        artifacts: [[artifactId: 'api-hotels-web', classifier: '', file: 'api-hotels-web-${BUILD_ID}.tar.gz', type: 'tar.gz']], credentialsId: 'APICIUser', groupId: 'com.apihotels', nexusUrl: '10.10.103.162:8081', nexusVersion: 'nexus3', protocol: 'http', version: "$VERSION", repository: 'maven-releases'
+                    )               
+                }            
+            }
+        }
+//         stage (' DEV deploy') {
+//             when
+//                 {
+//                   expression {
+//                         BRANCH_NAME ==~ /.*develop|.*feature\/.*|.*bug\/.*/
+//                     }
+//                 }
+// 		   steps {
+// 		      script {
+// 				  echo "Deploy application on developmment environment"
+// 				  ansibleTower( towerServer: 'awx', towerCredentialsId: 'ansible-awx', templateType: 'job', jobTemplate: 'DEV dpax_angular', importTowerLogs: true, inventory: '', jobTags: '', skipJobTags: '', removeColor: false, verbose: true, credential: '', extraVars: """--- 
+// dpax_angular_version: "${VERSION}"  
+// """)
+// 			    }  
+//             }
+// 		}
+//         stage (' QA deploy') {	
+//             when
+//                 {
+//                   expression {
+//                         BRANCH_NAME ==~ /.*develop|.*feature\/.*|.*bug\/.*/
+//                     }
+//                 }
+// 		   steps {
+// 		      script {
+// 				  echo 'Deploy application on qa environment'
+//                   timeout(time:5, unit:'DAYS') {
+//                       input message : 'Approval for QA needed' }
+// 				  ansibleTower( towerServer: 'awx', towerCredentialsId: 'ansible-awx', templateType: 'job', jobTemplate: 'QA dpax_angular', importTowerLogs: true, inventory: '', jobTags: '', skipJobTags: '', removeColor: false, verbose: true, credential: '', extraVars: """--- 
+// dpax_angular_version: "${VERSION}"  
+// """)
+// 				}
+// 			}
+//         }			
+        stage ('UAT deploy') {	
+            when
+                {
+                  expression {
+                        BRANCH_NAME ==~ /.*develop|.*feature\/.*|.*bug\/.*/
+                    }
+                }
+		    steps {
+		      script {
+				  echo 'Deploy application on uat environment'
+                  timeout(time:5, unit:'DAYS') {
+                      input message : 'Approval for UAT needed' }
+				  ansibleTower( towerServer: 'awx', towerCredentialsId: 'ansible-awx', templateType: 'job', jobTemplate: 'UAT dpax_angular', importTowerLogs: true, inventory: '', jobTags: '', skipJobTags: '', removeColor: false, verbose: true, credential: '', extraVars: """--- 
+dpax_angular_version: "${VERSION}"  
+""")
+				}
+			}
+		}	
+//         stage (' PROD deploy') {	
+//             when
+//                 {
+//                   expression {
+//                         BRANCH_NAME ==~ /.*develop|.*release\/.*|.*hotfix\/.*/
+//                     }
+//                 }
+// 		    steps {
+// 		      script {
+// 				  echo 'Deploy application on prod environment'
+//                   timeout(time:5, unit:'DAYS') {
+//                       input message : 'Approval for PROD needed' }
+// 				  ansibleTower( towerServer: 'awx', towerCredentialsId: 'ansible-awx', templateType: 'job', jobTemplate: 'PROD dpax_angular', importTowerLogs: true, inventory: '', jobTags: '', skipJobTags: '', removeColor: false, verbose: true, credential: '', extraVars: """--- 
+// dpax_angular_version: "${VERSION}"  
+// """)
+// 				}      				
+//             }		
+// 		}   
+    }
+    post {
+        success {
+            slackSend baseUrl: 'https://hooks.slack.com/services/', channel: '#eng_jenkins_builds', color: 'good', message: "pipeline got success for job: ${JOB_NAME} , build number: ${BUILD_NUMBER}, url: (<${BUILD_URL}|Open>)", teamDomain: 'accommodationsplus', tokenCredentialId: 'slack-jenkins-webhook' 
+            }
+        failure {
+            slackSend baseUrl: 'https://hooks.slack.com/services/', channel: '#eng_jenkins_builds', color: 'danger', message: "Pipeline got failed for job: ${JOB_NAME} , build number: ${BUILD_NUMBER}, url: (<${BUILD_URL}|Open>)", teamDomain: 'accommodationsplus', tokenCredentialId: 'slack-jenkins-webhook' 
+            }
+        unstable {
+            slackSend baseUrl: 'https://hooks.slack.com/services/', channel: '#eng_jenkins_builds', color: 'warning', message: "pipeline got unstable for job: ${JOB_NAME} , build number: ${BUILD_NUMBER}, url: (<${BUILD_URL}|Open>)", teamDomain: 'accommodationsplus', tokenCredentialId: 'slack-jenkins-webhook' 
+            }
+        aborted {
+            slackSend baseUrl: 'https://hooks.slack.com/services/', channel: '#eng_jenkins_builds', color: 'warning', message: "pipeline got aborted for job: ${JOB_NAME} , build number: ${BUILD_NUMBER}, url: (<${BUILD_URL}|Open>)", teamDomain: 'accommodationsplus', tokenCredentialId: 'slack-jenkins-webhook' 
+            }
+    }
+}
